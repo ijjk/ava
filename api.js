@@ -7,19 +7,18 @@ const escapeStringRegexp = require('escape-string-regexp');
 const uniqueTempDir = require('unique-temp-dir');
 const isCi = require('is-ci');
 const resolveCwd = require('resolve-cwd');
-const debounce = require('lodash.debounce');
-const Bluebird = require('bluebird');
-const getPort = require('get-port');
 const arrify = require('arrify');
 const makeDir = require('make-dir');
-const ms = require('ms');
 const chunkd = require('chunkd');
+const debug = require('debug')('ava:api');
 const babelPipeline = require('./lib/babel-pipeline');
 const Emittery = require('./lib/emittery');
 const RunStatus = require('./lib/run-status');
 const AvaFiles = require('./lib/ava-files');
-const fork = require('./lib/fork');
 const serializeError = require('./lib/serialize-error');
+
+const ForkTestPool = require('./lib/testpool/fork-test-pool');
+const SingleProcessTestPool = require('./lib/testpool/single-process-test-pool');
 
 function resolveModules(modules) {
 	return arrify(modules).map(name => {
@@ -47,41 +46,16 @@ class Api extends Emittery {
 
 	run(files, runtimeOptions = {}) {
 		const apiOptions = this.options;
-
-		// Each run will have its own status. It can only be created when test files
-		// have been found.
-		let runStatus;
-		// Irrespectively, perform some setup now, before finding test files.
-
-		// Track active forks and manage timeouts.
 		const failFast = apiOptions.failFast === true;
-		let bailed = false;
-		const pendingWorkers = new Set();
-		const timedOutWorkerFiles = new Set();
-		let restartTimer;
-		if (apiOptions.timeout) {
-			const timeout = ms(apiOptions.timeout);
-
-			restartTimer = debounce(() => {
-				// If failFast is active, prevent new test files from running after
-				// the current ones are exited.
-				if (failFast) {
-					bailed = true;
-				}
-
-				for (const worker of pendingWorkers) {
-					timedOutWorkerFiles.add(worker.file);
-					worker.exit();
-				}
-
-				runStatus.emitStateChange({type: 'timeout', period: timeout, timedOutWorkerFiles});
-			}, timeout);
-		} else {
-			restartTimer = Object.assign(() => {}, {cancel() {}});
-		}
+		let runStatus;
 
 		// Find all test files.
-		return new AvaFiles({cwd: apiOptions.resolveTestsFrom, files, extensions: this._allExtensions}).findTestFiles()
+		return new AvaFiles({
+			files,
+			extensions: this._allExtensions,
+			cwd: apiOptions.resolveTestsFrom
+		})
+			.findTestFiles()
 			.then(files => {
 				if (this.options.parallelRuns) {
 					const {currentIndex, totalRuns} = this.options.parallelRuns;
@@ -116,24 +90,6 @@ class Api extends Emittery {
 						return runStatus;
 					});
 				}
-
-				runStatus.on('stateChange', record => {
-					if (record.testFile && !timedOutWorkerFiles.has(record.testFile)) {
-						// Restart the timer whenever there is activity from workers that
-						// haven't already timed out.
-						restartTimer();
-					}
-
-					if (failFast && (record.type === 'hook-failed' || record.type === 'test-failed' || record.type === 'worker-failed')) {
-						// Prevent new test files from running once a test has failed.
-						bailed = true;
-
-						// Try to stop currently scheduled tests.
-						for (const worker of pendingWorkers) {
-							worker.notifyOfPeerFailure();
-						}
-					}
-				});
 
 				return emittedRun
 					.then(() => this._setupPrecompiler())
@@ -170,8 +126,9 @@ class Api extends Emittery {
 							});
 					})
 					.then(precompilation => {
-						// Resolve the correct concurrency value.
-						let concurrency = Math.min(os.cpus().length, isCi ? 2 : Infinity);
+						// Resolve the correct concurrency value
+						// minus 1 cpu since we're already in a process
+						let concurrency = Math.min(os.cpus().length - 1, isCi ? 2 : Infinity);
 						if (apiOptions.concurrency > 0) {
 							concurrency = apiOptions.concurrency;
 						}
@@ -179,50 +136,29 @@ class Api extends Emittery {
 						if (apiOptions.serial) {
 							concurrency = 1;
 						}
+						let ProcessPool;
 
-						// Try and run each file, limited by `concurrency`.
-						return Bluebird.map(files, file => {
-							// No new files should be run once a test has timed out or failed,
-							// and failFast is enabled.
-							if (bailed) {
-								return;
-							}
+						if (!apiOptions.fork || files.length < concurrency || concurrency < 2) {
+							ProcessPool = SingleProcessTestPool;
+							debug('Using single process pool');
+						} else {
+							ProcessPool = ForkTestPool;
+							debug('Using fork process pool');
+						}
 
-							return this._computeForkExecArgv().then(execArgv => {
-								const options = Object.assign({}, apiOptions, {
-									// If we're looking for matches, run every single test process in exclusive-only mode
-									runOnlyExclusive: apiOptions.match.length > 0 || runtimeOptions.runOnlyExclusive === true
-								});
-								if (precompilation) {
-									options.cacheDir = precompilation.cacheDir;
-									options.precompiled = precompilation.map;
-								} else {
-									options.precompiled = {};
-								}
-
-								if (runtimeOptions.updateSnapshots) {
-									// Don't use in Object.assign() since it'll override options.updateSnapshots even when false.
-									options.updateSnapshots = true;
-								}
-
-								const worker = fork(file, options, execArgv);
-								runStatus.observeWorker(worker, file);
-
-								pendingWorkers.add(worker);
-								worker.promise.then(() => { // eslint-disable-line max-nested-callbacks
-									pendingWorkers.delete(worker);
-								});
-								restartTimer();
-
-								return worker.promise;
-							});
-						}, {concurrency});
+						const testPool = new ProcessPool(files, {
+							failFast,
+							runStatus,
+							api: this,
+							concurrency,
+							precompilation
+						});
+						return testPool.run();
 					})
 					.catch(err => {
 						runStatus.emitStateChange({type: 'internal-error', err: serializeError('Internal error', false, err)});
 					})
 					.then(() => {
-						restartTimer.cancel();
 						return runStatus;
 					});
 			});
@@ -264,54 +200,6 @@ class Api extends Emittery {
 			precompileFull
 		};
 		return this._precompiler;
-	}
-
-	_computeForkExecArgv() {
-		const execArgv = this.options.testOnlyExecArgv || process.execArgv;
-		if (execArgv.length === 0) {
-			return Promise.resolve(execArgv);
-		}
-
-		let debugArgIndex = -1;
-
-		// --inspect-brk is used in addition to --inspect to break on first line and wait
-		execArgv.some((arg, index) => {
-			const isDebugArg = /^--inspect(-brk)?($|=)/.test(arg);
-			if (isDebugArg) {
-				debugArgIndex = index;
-			}
-
-			return isDebugArg;
-		});
-
-		const isInspect = debugArgIndex >= 0;
-		if (!isInspect) {
-			execArgv.some((arg, index) => {
-				const isDebugArg = /^--debug(-brk)?($|=)/.test(arg);
-				if (isDebugArg) {
-					debugArgIndex = index;
-				}
-
-				return isDebugArg;
-			});
-		}
-
-		if (debugArgIndex === -1) {
-			return Promise.resolve(execArgv);
-		}
-
-		return getPort().then(port => {
-			const forkExecArgv = execArgv.slice();
-			let flagName = isInspect ? '--inspect' : '--debug';
-			const oldValue = forkExecArgv[debugArgIndex];
-			if (oldValue.indexOf('brk') > 0) {
-				flagName += '-brk';
-			}
-
-			forkExecArgv[debugArgIndex] = `${flagName}=${port}`;
-
-			return forkExecArgv;
-		});
 	}
 }
 
