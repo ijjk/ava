@@ -7,8 +7,10 @@ const escapeStringRegexp = require('escape-string-regexp');
 const uniqueTempDir = require('unique-temp-dir');
 const isCi = require('is-ci');
 const resolveCwd = require('resolve-cwd');
+const debounce = require('lodash.debounce');
 const arrify = require('arrify');
 const makeDir = require('make-dir');
+const ms = require('ms');
 const chunkd = require('chunkd');
 const debug = require('debug')('ava:api');
 const babelPipeline = require('./lib/babel-pipeline');
@@ -48,6 +50,8 @@ class Api extends Emittery {
 		const apiOptions = this.options;
 		const failFast = apiOptions.failFast === true;
 		let runStatus;
+		let testPool;
+		let restartTimer;
 
 		// Find all test files.
 		return new AvaFiles({
@@ -91,6 +95,14 @@ class Api extends Emittery {
 					});
 				}
 
+				runStatus.on('stateChange', record => {
+					if (record.testFile) {
+						// Restart the timer whenever there is activity from workers that
+						// haven't already timed out.
+						restartTimer();
+					}
+				});
+
 				return emittedRun
 					.then(() => this._setupPrecompiler())
 					.then(precompilation => {
@@ -126,6 +138,19 @@ class Api extends Emittery {
 							});
 					})
 					.then(precompilation => {
+						// Set up timeout
+						if (apiOptions.timeout) {
+							const timeout = ms(apiOptions.timeout);
+
+							restartTimer = debounce(() => {
+								debug('bailing');
+								runStatus.emitStateChange({type: 'timeout', period: timeout, timedOutWorkerFiles: []});
+								testPool.bail();
+							}, timeout);
+						} else {
+							restartTimer = Object.assign(() => {}, {cancel() {}});
+						}
+
 						// Resolve the correct concurrency value
 						// minus 1 cpu since we're already in a process
 						let concurrency = Math.min(os.cpus().length - 1, isCi ? 2 : Infinity);
@@ -136,9 +161,15 @@ class Api extends Emittery {
 						if (apiOptions.serial) {
 							concurrency = 1;
 						}
+
+						const isDebug = Boolean(
+							/* eslint-disable-next-line no-undef */
+							typeof v8debug === 'object' ||
+							/--debug|--inspect/.test(process.execArgv.join(' '))
+						);
 						let ProcessPool;
 
-						if (!apiOptions.fork || files.length < concurrency || concurrency < 2) {
+						if (!apiOptions.fork || files.length < concurrency || concurrency < 2 || isDebug) {
 							ProcessPool = SingleProcessTestPool;
 							debug('Using single process pool');
 						} else {
@@ -146,7 +177,7 @@ class Api extends Emittery {
 							debug('Using fork process pool');
 						}
 
-						const testPool = new ProcessPool(files, {
+						testPool = new ProcessPool(files, {
 							failFast,
 							runStatus,
 							api: this,
@@ -159,6 +190,7 @@ class Api extends Emittery {
 						runStatus.emitStateChange({type: 'internal-error', err: serializeError('Internal error', false, err)});
 					})
 					.then(() => {
+						restartTimer.cancel();
 						return runStatus;
 					});
 			});
