@@ -54,7 +54,7 @@ Arguments passed to the CLI will always take precedence over the CLI options con
 - `match`: not typically useful in the `package.json` configuration, but equivalent to [specifying `--match` on the CLI](./05-command-line.md#running-tests-with-matching-titles)
 - `cache`: cache compiled test and helper files under `node_modules/.cache/ava`. If `false`, files are cached in a temporary directory instead
 - `failFast`: stop running further tests once a test fails
-- `fork`: don't run tests in forked processes
+- `fork`: if `false` don't run tests in forked processes
 - `failWithoutAssertions`: if `false`, does not fail a test if it doesn't run [assertions](./03-assertions.md)
 - `tap`: if `true`, enables the [TAP reporter](./05-command-line.md#tap-reporter)
 - `verbose`: if `true`, enables verbose output

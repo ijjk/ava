@@ -18,7 +18,11 @@ test('timeout', t => {
 test('include anonymous functions in error reports', t => {
 	execCli('error-in-anonymous-function.js', (err, stdout) => {
 		t.ok(err);
-		t.match(stdout, /test\/fixture\/error-in-anonymous-function\.js:4:8/);
+		/*
+			TODO: remove before finished
+			same reason as ./stack-traces:16 change
+		*/
+		t.match(stdout, /error-in-anonymous-function\.js:4:8/);
 		t.end();
 	});
 });
