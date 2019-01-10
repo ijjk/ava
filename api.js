@@ -51,7 +51,7 @@ class Api extends Emittery {
 		const failFast = apiOptions.failFast === true;
 		let runStatus;
 		let testPool;
-		let restartTimer;
+		let restartTimer = Object.assign(() => {}, {cancel() {}})
 
 		// Find all test files.
 		return new AvaFiles({
@@ -147,8 +147,6 @@ class Api extends Emittery {
 								runStatus.emitStateChange({type: 'timeout', period: timeout, timedOutWorkerFiles: []});
 								testPool.bail();
 							}, timeout);
-						} else {
-							restartTimer = Object.assign(() => {}, {cancel() {}});
 						}
 
 						// Resolve the correct concurrency value
