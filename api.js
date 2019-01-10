@@ -51,7 +51,7 @@ class Api extends Emittery {
 		const failFast = apiOptions.failFast === true;
 		let runStatus;
 		let testPool;
-		let restartTimer = Object.assign(() => {}, {cancel() {}})
+		let restartTimer = Object.assign(() => {}, {cancel() {}});
 
 		// Find all test files.
 		return new AvaFiles({

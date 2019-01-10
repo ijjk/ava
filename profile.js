@@ -4,7 +4,7 @@
 // This cli command will run a single file in the current process.
 // Intended to be used with iron-node for profiling purposes.
 
-const meow = require('meow')
+const meow = require('meow');
 const debug = require('debug')('ava');
 const importLocal = require('import-local');
 
@@ -40,5 +40,5 @@ if (cli.input.length === 0) {
 if (importLocal(__filename)) {
 	debug('Using local install of AVA');
 } else {
-	require('./lib/cli').run({ fork: false });
+	require('./lib/cli').run({fork: false});
 }
