@@ -202,12 +202,8 @@ test('fail-fast mode - multiple files & interrupt', t => {
 				ok: true,
 				testFile: path.join(__dirname, 'fixture/fail-fast/multiple-files/fails.js'),
 				title: 'third pass'
-			}, {
-				ok: true,
-				testFile: path.join(__dirname, 'fixture/fail-fast/multiple-files/passes-slow.js'),
-				title: 'first pass'
 			}]);
-			t.is(runStatus.stats.passedTests, 3);
+			t.is(runStatus.stats.passedTests, 2);
 			t.is(runStatus.stats.failedTests, 1);
 		});
 });
