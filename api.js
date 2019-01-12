@@ -159,7 +159,12 @@ class Api extends Emittery {
 						if (apiOptions.serial) {
 							concurrency = 1;
 						}
-
+						// If using a different projectDir we have to fork
+						// to have the correct cwd
+						const hasCustomProjectDir = Boolean(
+							apiOptions.projectDir &&
+							apiOptions.projectDir !== process.cwd()
+						);
 						const isDebug = Boolean(
 							/* eslint-disable-next-line no-undef */
 							typeof v8debug === 'object' ||
@@ -167,7 +172,10 @@ class Api extends Emittery {
 						);
 						let ProcessPool;
 
-						if (!apiOptions.fork || files.length < concurrency || concurrency < 2 || isDebug) {
+						if (
+							(!apiOptions.fork || files.length < concurrency || concurrency < 2) &&
+							(!hasCustomProjectDir || isDebug)
+						) {
 							ProcessPool = SingleProcessTestPool;
 							debug('Using single process pool');
 						} else {
@@ -185,9 +193,11 @@ class Api extends Emittery {
 						return testPool.run();
 					})
 					.catch(err => {
+						debug('testpool threw error', err);
 						runStatus.emitStateChange({type: 'internal-error', err: serializeError('Internal error', false, err)});
 					})
 					.then(() => {
+						debug('testpool finished');
 						restartTimer.cancel();
 						return runStatus;
 					});
