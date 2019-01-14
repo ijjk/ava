@@ -10,8 +10,7 @@ const babelPipeline = require('../lib/babel-pipeline');
 
 const testCapitalizerPlugin = require.resolve('./fixture/babel-plugin-test-capitalizer');
 // Use different projectDir to force forking
-const TEST_DIR = path.join(__dirname);
-const ROOT_DIR = path.join(TEST_DIR, '..');
+const ROOT_DIR = path.join(__dirname, '..');
 
 function withNodeEnv(value, run) {
 	process.env.NODE_ENV = value;
@@ -30,7 +29,10 @@ function apiCreator(options = {}) {
 	options.babelConfig = babelPipeline.validate(options.babelConfig);
 	options.concurrency = 2;
 	options.extensions = options.extensions || {all: ['js'], enhancementsOnly: [], full: ['js']};
-	options.projectDir = options.projectDir || TEST_DIR;
+	options.projectDir = options.projectDir || ROOT_DIR;
+	// Need to use forks for testing since tap catches errors the same
+	// way single-process-test-pool does and considers it a fail
+	options.forceFork = true;
 	options.resolveTestsFrom = options.resolveTestsFrom || options.projectDir;
 	const instance = new Api(options);
 	if (!options.precompileHelpers) {
@@ -216,93 +218,88 @@ test('fail-fast mode - multiple files & interrupt', t => {
 		});
 });
 
-/*
-	TODO: figure out why node-tap considers these tests unfinished
-	even though they have the correct output and api is cleaned up
-	correctly
-*/
-// test('fail-fast mode - crash & serial', async t => {
-// 	const api = apiCreator({
-// 		failFast: true,
-// 		serial: true
-// 	});
+test('fail-fast mode - crash & serial', t => {
+	const api = apiCreator({
+		failFast: true,
+		serial: true
+	});
 
-// 	const tests = [];
-// 	const workerFailures = [];
+	const tests = [];
+	const workerFailures = [];
 
-// 	api.on('run', plan => {
-// 		plan.status.on('stateChange', evt => {
-// 			if (evt.type === 'test-failed') {
-// 				tests.push({
-// 					ok: false,
-// 					title: evt.title
-// 				});
-// 			} else if (evt.type === 'test-passed') {
-// 				tests.push({
-// 					ok: true,
-// 					title: evt.title
-// 				});
-// 			} else if (evt.type === 'worker-failed') {
-// 				workerFailures.push(evt);
-// 			}
-// 		});
-// 	});
+	api.on('run', plan => {
+		plan.status.on('stateChange', evt => {
+			if (evt.type === 'test-failed') {
+				tests.push({
+					ok: false,
+					title: evt.title
+				});
+			} else if (evt.type === 'test-passed') {
+				tests.push({
+					ok: true,
+					title: evt.title
+				});
+			} else if (evt.type === 'worker-failed') {
+				workerFailures.push(evt);
+			}
+		});
+	});
 
-// 	await api.run([
-// 		path.join(__dirname, 'fixture/fail-fast/crash/crashes.js'),
-// 		path.join(__dirname, 'fixture/fail-fast/crash/passes.js')
-// 	])
-// 		.then(runStatus => {
-// 			t.ok(api.options.failFast);
-// 			t.strictDeepEqual(tests, []);
-// 			t.is(workerFailures.length, 1);
-// 			t.is(workerFailures[0].testFile, path.join(__dirname, 'fixture', 'fail-fast', 'crash', 'crashes.js'));
-// 			t.is(runStatus.stats.passedTests, 0);
-// 			t.is(runStatus.stats.failedTests, 0);
-// 		});
-// });
+	return api.run([
+		path.join(__dirname, 'fixture/fail-fast/crash/crashes.js'),
+		path.join(__dirname, 'fixture/fail-fast/crash/passes.js')
+	])
+		.then(runStatus => {
+			t.ok(api.options.failFast);
+			t.strictDeepEqual(tests, []);
+			t.is(workerFailures.length, 1);
+			t.is(workerFailures[0].testFile, path.join(__dirname, 'fixture', 'fail-fast', 'crash', 'crashes.js'));
+			t.is(runStatus.stats.passedTests, 0);
+			t.is(runStatus.stats.failedTests, 0);
+		});
+});
 
-// test('fail-fast mode - timeout & serial', t => {
-// 	const api = apiCreator({
-// 		failFast: true,
-// 		serial: true,
-// 		timeout: '100ms'
-// 	});
+test('fail-fast mode - timeout & serial', t => {
+	const api = apiCreator({
+		failFast: true,
+		serial: true,
+		timeout: '100ms'
+	});
 
-// 	const tests = [];
-// 	const timeouts = [];
+	const tests = [];
+	const timeouts = [];
 
-// 	api.on('run', plan => {
-// 		plan.status.on('stateChange', evt => {
-// 			if (evt.type === 'test-failed') {
-// 				tests.push({
-// 					ok: false,
-// 					title: evt.title
-// 				});
-// 			} else if (evt.type === 'test-passed') {
-// 				tests.push({
-// 					ok: true,
-// 					title: evt.title
-// 				});
-// 			} else if (evt.type === 'timeout') {
-// 				timeouts.push(evt);
-// 			}
-// 		});
-// 	});
+	api.on('run', plan => {
+		plan.status.on('stateChange', evt => {
+			if (evt.type === 'test-failed') {
+				tests.push({
+					ok: false,
+					title: evt.title
+				});
+			} else if (evt.type === 'test-passed') {
+				tests.push({
+					ok: true,
+					title: evt.title
+				});
+			} else if (evt.type === 'timeout') {
+				timeouts.push(evt);
+			}
+		});
+	});
 
-// 	return api.run([
-// 		path.join(__dirname, 'fixture/fail-fast/timeout/fails.js'),
-// 		path.join(__dirname, 'fixture/fail-fast/timeout/passes.js')
-// 	])
-// 		.then(runStatus => {
-// 			t.ok(api.options.failFast);
-// 			t.strictDeepEqual(tests, []);
-// 			t.is(timeouts.length, 1);
-// 			t.is(timeouts[0].period, 100);
-// 			t.is(runStatus.stats.passedTests, 0);
-// 			t.is(runStatus.stats.failedTests, 0);
-// 		});
-// });
+	return api.run([
+		path.join(__dirname, 'fixture/fail-fast/timeout/fails.js'),
+		path.join(__dirname, 'fixture/fail-fast/timeout/passes.js')
+	])
+		.then(runStatus => {
+			t.ok(api.options.failFast);
+			t.strictDeepEqual(tests, []);
+			t.is(timeouts.length, 1);
+			t.is(timeouts[0].period, 100);
+			t.is(runStatus.stats.passedTests, 0);
+			t.is(runStatus.stats.failedTests, 0);
+		});
+});
 
 test('fail-fast mode - no errors', t => {
 	const api = apiCreator({
@@ -334,9 +331,7 @@ test('serial execution mode', t => {
 });
 
 test('run from package.json folder by default', t => {
-	const api = apiCreator({
-		projectDir: ROOT_DIR
-	});
+	const api = apiCreator();
 
 	return api.run([path.join(__dirname, 'fixture/process-cwd-default.js')])
 		.then(runStatus => {

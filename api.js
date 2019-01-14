@@ -159,22 +159,25 @@ class Api extends Emittery {
 						if (apiOptions.serial) {
 							concurrency = 1;
 						}
+
 						// If using a different projectDir we have to fork
 						// to have the correct cwd
-						const hasCustomProjectDir = Boolean(
+						const hasDifProjectDir = Boolean(
 							apiOptions.projectDir &&
 							apiOptions.projectDir !== process.cwd()
 						);
+
 						const isDebug = Boolean(
 							/* eslint-disable-next-line no-undef */
 							typeof v8debug === 'object' ||
 							/--debug|--inspect/.test(process.execArgv.join(' '))
 						);
+
 						let ProcessPool;
 
-						if (
+						if (!apiOptions.forceFork &&
 							(!apiOptions.fork || files.length < concurrency || concurrency < 2) &&
-							(!hasCustomProjectDir || isDebug)
+							(!hasDifProjectDir || isDebug)
 						) {
 							ProcessPool = SingleProcessTestPool;
 							debug('Using single process pool');
