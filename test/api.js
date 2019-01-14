@@ -1,7 +1,6 @@
 'use strict';
 require('../lib/chalk').set();
 
-const assert = require('assert');
 const path = require('path');
 const fs = require('fs');
 const del = require('del');
@@ -10,11 +9,11 @@ const Api = require('../api');
 const babelPipeline = require('../lib/babel-pipeline');
 
 const testCapitalizerPlugin = require.resolve('./fixture/babel-plugin-test-capitalizer');
-
-const ROOT_DIR = path.join(__dirname, '..');
+// Use different projectDir to force forking
+const TEST_DIR = path.join(__dirname);
+const ROOT_DIR = path.join(TEST_DIR, '..');
 
 function withNodeEnv(value, run) {
-	assert(!('NODE_ENV' in process.env));
 	process.env.NODE_ENV = value;
 	const reset = () => {
 		delete process.env.NODE_ENV;
@@ -31,7 +30,7 @@ function apiCreator(options = {}) {
 	options.babelConfig = babelPipeline.validate(options.babelConfig);
 	options.concurrency = 2;
 	options.extensions = options.extensions || {all: ['js'], enhancementsOnly: [], full: ['js']};
-	options.projectDir = options.projectDir || ROOT_DIR;
+	options.projectDir = options.projectDir || TEST_DIR;
 	options.resolveTestsFrom = options.resolveTestsFrom || options.projectDir;
 	const instance = new Api(options);
 	if (!options.precompileHelpers) {
@@ -254,14 +253,13 @@ test('fail-fast mode - multiple files & interrupt', t => {
 // 		path.join(__dirname, 'fixture/fail-fast/crash/passes.js')
 // 	])
 // 		.then(runStatus => {
-// 			// t.ok(api.options.failFast);
-// 			// t.strictDeepEqual(tests, []);
+// 			t.ok(api.options.failFast);
+// 			t.strictDeepEqual(tests, []);
 // 			t.is(workerFailures.length, 1);
 // 			t.is(workerFailures[0].testFile, path.join(__dirname, 'fixture', 'fail-fast', 'crash', 'crashes.js'));
 // 			t.is(runStatus.stats.passedTests, 0);
 // 			t.is(runStatus.stats.failedTests, 0);
 // 		});
-// 	console.log('TEST FINI');
 // });
 
 // test('fail-fast mode - timeout & serial', t => {
@@ -336,7 +334,9 @@ test('serial execution mode', t => {
 });
 
 test('run from package.json folder by default', t => {
-	const api = apiCreator();
+	const api = apiCreator({
+		projectDir: ROOT_DIR
+	});
 
 	return api.run([path.join(__dirname, 'fixture/process-cwd-default.js')])
 		.then(runStatus => {
@@ -502,12 +502,18 @@ test('stack traces for exceptions are corrected using a source map, taking an in
 		cacheEnabled: true
 	});
 
+	/*
+		TODO: remove before finished
+
+		same as line 532
+	 */
+
 	api.on('run', plan => {
 		plan.status.on('stateChange', evt => {
 			if (evt.type === 'uncaught-exception') {
 				t.match(evt.err.message, /Thrown by source-map-fixtures/);
 				t.match(evt.err.stack, /^.*?Object\.t.*?as run\b.*source-map-fixtures.src.throws.js:1.*$/m);
-				t.match(evt.err.stack, /^.*?Immediate\b.*source-map-initial-input.js:14.*$/m);
+				t.match(evt.err.stack, /^.*?Immediate\b.*source-map-initial.js:14.*$/m);
 			}
 		});
 	});
@@ -521,6 +527,14 @@ test('stack traces for exceptions are corrected using a source map, taking an in
 test('stack traces for exceptions are corrected using a source map, taking an initial source map for the test file into account (cache off)', t => {
 	t.plan(4);
 
+	/*
+		TODO: remove before finished
+
+		had to keep custom source map file name the same to be able
+		to detect this error. If this goes against the goals will
+		have to figure out a different way to handle errors
+	 */
+
 	const api = apiCreator({
 		cacheEnabled: false
 	});
@@ -530,7 +544,7 @@ test('stack traces for exceptions are corrected using a source map, taking an in
 			if (evt.type === 'uncaught-exception') {
 				t.match(evt.err.message, /Thrown by source-map-fixtures/);
 				t.match(evt.err.stack, /^.*?Object\.t.*?as run\b.*source-map-fixtures.src.throws.js:1.*$/m);
-				t.match(evt.err.stack, /^.*?Immediate\b.*source-map-initial-input.js:14.*$/m);
+				t.match(evt.err.stack, /^.*?Immediate\b.*source-map-initial.js:14.*$/m);
 			}
 		});
 	});

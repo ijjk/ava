@@ -188,7 +188,9 @@ class Api extends Emittery {
 							runStatus,
 							api: this,
 							concurrency,
-							precompilation
+							precompilation,
+							// If we're looking for matches, run every single test process in exclusive-only mode
+							runOnlyExclusive: apiOptions.match.length > 0 || runtimeOptions.runOnlyExclusive === true
 						});
 						return testPool.run();
 					})
