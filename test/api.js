@@ -6,10 +6,11 @@ const fs = require('fs');
 const del = require('del');
 const {test} = require('tap');
 const Api = require('../api');
+const ForkTestPool = require('../lib/testpool/fork-test-pool');
 const babelPipeline = require('../lib/babel-pipeline');
 
 const testCapitalizerPlugin = require.resolve('./fixture/babel-plugin-test-capitalizer');
-// Use different projectDir to force forking
+
 const ROOT_DIR = path.join(__dirname, '..');
 
 function withNodeEnv(value, run) {
@@ -497,18 +498,12 @@ test('stack traces for exceptions are corrected using a source map, taking an in
 		cacheEnabled: true
 	});
 
-	/*
-		TODO: remove before finished
-
-		same as line 532
-	 */
-
 	api.on('run', plan => {
 		plan.status.on('stateChange', evt => {
 			if (evt.type === 'uncaught-exception') {
 				t.match(evt.err.message, /Thrown by source-map-fixtures/);
 				t.match(evt.err.stack, /^.*?Object\.t.*?as run\b.*source-map-fixtures.src.throws.js:1.*$/m);
-				t.match(evt.err.stack, /^.*?Immediate\b.*source-map-initial.js:14.*$/m);
+				t.match(evt.err.stack, /^.*?Immediate\b.*source-map-initial-input.js:14.*$/m);
 			}
 		});
 	});
@@ -522,14 +517,6 @@ test('stack traces for exceptions are corrected using a source map, taking an in
 test('stack traces for exceptions are corrected using a source map, taking an initial source map for the test file into account (cache off)', t => {
 	t.plan(4);
 
-	/*
-		TODO: remove before finished
-
-		had to keep custom source map file name the same to be able
-		to detect this error. If this goes against the goals will
-		have to figure out a different way to handle errors
-	 */
-
 	const api = apiCreator({
 		cacheEnabled: false
 	});
@@ -539,7 +526,7 @@ test('stack traces for exceptions are corrected using a source map, taking an in
 			if (evt.type === 'uncaught-exception') {
 				t.match(evt.err.message, /Thrown by source-map-fixtures/);
 				t.match(evt.err.stack, /^.*?Object\.t.*?as run\b.*source-map-fixtures.src.throws.js:1.*$/m);
-				t.match(evt.err.stack, /^.*?Immediate\b.*source-map-initial.js:14.*$/m);
+				t.match(evt.err.stack, /^.*?Immediate\b.*source-map-initial-input.js:14.*$/m);
 			}
 		});
 	});
@@ -1202,9 +1189,72 @@ test('using --match with matching tests will only report those passing tests', t
 	});
 });
 
-/*
-	TODO: remove when finished
+function generatePassDebugTests(execArgv, expectedInspectIndex) {
+	test(`pass ${execArgv.join(' ')} to fork`, t => {
+		const api = apiCreator({testOnlyExecArgv: execArgv});
+		const forkPool = new ForkTestPool([], {api});
 
-	removed passing --debug args to forks since
-	tests are run in single process with --debug and --inspect
-*/
+		return forkPool._computeForkExecArgv()
+			.then(result => {
+				t.true(result.length === execArgv.length);
+				if (expectedInspectIndex === -1) {
+					t.true(/--debug=\d+/.test(result[0]));
+				} else {
+					t.true(/--inspect=\d+/.test(result[expectedInspectIndex]));
+				}
+			});
+	});
+}
+
+function generatePassDebugIntegrationTests(execArgv) {
+	test(`pass ${execArgv.join(' ')} to fork`, t => {
+		const api = apiCreator({testOnlyExecArgv: execArgv});
+		return api.run([path.join(__dirname, 'fixture/debug-arg.js')])
+			.then(runStatus => {
+				t.is(runStatus.stats.passedTests, 1);
+			});
+	});
+}
+
+function generatePassInspectIntegrationTests(execArgv) {
+	test(`pass ${execArgv.join(' ')} to fork`, t => {
+		const api = apiCreator({testOnlyExecArgv: execArgv});
+		return api.run([path.join(__dirname, 'fixture/inspect-arg.js')])
+			.then(runStatus => {
+				t.is(runStatus.stats.passedTests, 1);
+			});
+	});
+}
+
+generatePassDebugTests(['--debug=0'], -1);
+generatePassDebugTests(['--debug'], -1);
+
+generatePassDebugTests(['--inspect=0'], 0);
+generatePassDebugTests(['--inspect'], 0);
+
+// --inspect takes precedence
+generatePassDebugTests(['--inspect=0', '--debug-brk'], 0);
+generatePassDebugTests(['--inspect', '--debug-brk'], 0);
+
+// --inspect takes precedence, though --debug-brk is still passed to the worker
+generatePassDebugTests(['--debug-brk', '--inspect=0'], 1);
+generatePassDebugTests(['--debug-brk', '--inspect'], 1);
+
+if (Number(process.version.split('.')[0].slice(1)) < 8) {
+	generatePassDebugIntegrationTests(['--debug=0']);
+	generatePassDebugIntegrationTests(['--debug']);
+} else {
+	generatePassInspectIntegrationTests(['--inspect=9229']);
+	generatePassInspectIntegrationTests(['--inspect']);
+}
+
+test('`esm` package support', t => {
+	const api = apiCreator({
+		require: [require.resolve('esm')]
+	});
+
+	return api.run([path.join(__dirname, 'fixture/esm-pkg/test.js')])
+		.then(runStatus => {
+			t.is(runStatus.stats.passedTests, 1);
+		});
+});
