@@ -5,6 +5,7 @@ if (!module.parent || !module.parent.filename) {
 	/* eslint-disable-next-line import/no-unassigned-import */
 	require('./lib/worker/ensure-forked');
 }
+
 // Get name of test file
 const {filename} = module.parent;
 
