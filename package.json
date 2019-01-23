@@ -140,8 +140,7 @@
 		"trim-off-newlines": "^1.0.1",
 		"trim-right": "^1.0.1",
 		"unique-temp-dir": "^1.0.0",
-		"update-notifier": "^2.5.0",
-		"vm2": "^3.6.6"
+		"update-notifier": "^2.5.0"
 	},
 	"devDependencies": {
 		"cli-table3": "^0.5.1",
