@@ -150,8 +150,7 @@ class Api extends Emittery {
 						}
 
 						// Resolve the correct concurrency value
-						// minus 1 cpu since we're already in a process
-						let concurrency = Math.min(os.cpus().length - 1, isCi ? 2 : Infinity);
+						let concurrency = Math.min(os.cpus().length, isCi ? 2 : Infinity);
 						if (apiOptions.concurrency > 0) {
 							concurrency = apiOptions.concurrency;
 						}
@@ -159,6 +158,8 @@ class Api extends Emittery {
 						if (apiOptions.serial) {
 							concurrency = 1;
 						}
+
+						debug('using concurrency', concurrency);
 
 						// If using a different projectDir we have to fork
 						// to have the correct cwd
@@ -175,9 +176,8 @@ class Api extends Emittery {
 
 						let ProcessPool;
 
-						if (!apiOptions.forceFork &&
-							(!apiOptions.fork || files.length < concurrency || concurrency < 2) &&
-							(!hasDifProjectDir || isDebug)
+						if (!apiOptions.forceFork && !hasDifProjectDir &&
+							(!apiOptions.fork || files.length < concurrency || concurrency < 2 || isDebug)
 						) {
 							ProcessPool = SingleProcessTestPool;
 							debug('Using single process pool');
