@@ -15,8 +15,8 @@ test('formats errors from ava.config.js', t => {
 		t.is(lines[0], '');
 		t.is(lines[1], figures.cross + ' Error loading ava.config.js');
 		t.is(lines[2], '');
-		t.match(lines[3], /foo/);
-		t.match(lines[4], /ava\.config\.js/);
+		t.match(lines[3], /ava\.config\.js/);
+		t.match(lines[4], /foo/);
 		t.end();
 	});
 });
