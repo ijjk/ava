@@ -15,7 +15,7 @@ if (filename.indexOf('node_modules/ava') > -1) {
 	module.exports = require('./lib/worker/main');
 } else if (process.env.AVA_PATH && process.env.AVA_PATH !== __dirname) {
 	// Ensure the same AVA install is loaded by the test file as by the test worker
-	module.exports = require(process.env.AVA_PATH)(filename);
+	module.exports = require(process.env.AVA_PATH)();
 } else {
-	module.exports = require('./lib/worker/main')(filename);
+	module.exports = require('./lib/worker/main')();
 }
